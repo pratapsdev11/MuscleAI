@@ -152,7 +152,13 @@ exercise_type = st.selectbox("Select Exercise Type", list(yolo_models.keys()))
 uploaded_file = st.file_uploader("Upload a Video", type=["mp4", "mov"])
 
 if uploaded_file is not None:
-    video_path = os.path.join('./videos', uploaded_file.name)
+    video_dir = './videos'
+    if not os.path.exists(video_dir):
+        os.makedirs(video_dir)
+
+    video_path = os.path.join(video_dir, uploaded_file.name)
+
+    
     
     # Save uploaded video
     with open(video_path, "wb") as f:
