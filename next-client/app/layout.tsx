@@ -2,6 +2,7 @@ import "./globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
 import { MainNav } from "@/components/main-nav"
 import { ModeToggle } from "@/components/mode-toggle"
+import { Footer } from "@/components/footer"
 
 export const metadata = {
   title: "JIM - Just In Motion",
@@ -32,6 +33,7 @@ export default function RootLayout({
               </div>
             </header>
             <main className="flex-1">{children}</main>
+            <Footer />
           </div>
         </ThemeProvider>
       </body>
