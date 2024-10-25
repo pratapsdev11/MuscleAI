@@ -4,8 +4,11 @@ from flask import Flask, render_template, send_from_directory, request, url_for,
 import cv2
 from moviepy.editor import VideoFileClip
 from ultralytics import YOLO
+from flask_cors import CORS, cross_origin
 
 app = Flask(__name__)
+
+CORS(app, supports_credentials=True)
 
 # Configuration: Specify the directory where videos are stored
 VIDEO_FOLDER = './videos'
@@ -26,12 +29,12 @@ logging.basicConfig(level=logging.DEBUG)
 
 # Load the YOLO models
 yolo_models = {
-    'regular_deadlift': YOLO("best.pt"),
-    'sumo_deadlift': YOLO("sumo_best.pt"),
-    'squat': YOLO("squats_best.pt"),
-    'romanian_deadlift': YOLO("best_romanian.pt"),
-    "zercher_squat": YOLO("zercher_best.pt"),
-    "front_squat": YOLO("front_squats_best.pt")
+    'regular_deadlift': YOLO("muscleAi_weights/best.pt"),
+    'sumo_deadlift': YOLO("muscleAi_weights/sumo_best.pt"),
+    'squat': YOLO("muscleAi_weights/squats_best.pt"),
+    'romanian_deadlift': YOLO("muscleAi_weights/best_romanian.pt"),
+    "zercher_squat": YOLO("muscleAi_weights/zercher_best.pt"),
+    "front_squat": YOLO("muscleAi_weights/front_squats_best.pt")
 }
 
 # Function to check for injury risk
@@ -184,17 +187,24 @@ def process_live_video(exercise_type):
                     frame = draw_keypoints(frame, keypoints)
 
                 cv2.putText(frame, f"Injury Risk: {injury_risk}", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2, cv2.LINE_AA)
-                # cv2.putText(frame, f"Repetitions: {rep_count}", (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
 
                 ret, buffer = cv2.imencode('.jpg', frame)
                 frame = buffer.tobytes()
 
+                # Yielding the frame with CORS headers
                 yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+                       b'Content-Type: image/jpeg\r\n'
+                       b'Access-Control-Allow-Origin: http://localhost:3000\r\n'
+                       b'Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n'
+                       b'Access-Control-Allow-Headers: Content-Type\r\n\r\n' + frame + b'\r\n')
 
-    return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+    return Response(
+        generate_frames(),
+        mimetype='multipart/x-mixed-replace; boundary=frame'
+    )
 
 @app.route('/<filename>', methods=['GET'])
+@cross_origin(origin='*')
 def serve_video(filename):
     try:
         logging.debug(f"Serving video: {filename}")
@@ -204,6 +214,7 @@ def serve_video(filename):
         return "Error serving video", 500
 
 @app.route('/', methods=['GET', 'POST'])
+@cross_origin(origin='*')
 def index():
     if request.method == 'POST':
         if 'video' in request.files:
@@ -233,10 +244,28 @@ def index():
     
     return render_template('index.html')
 
-@app.route('/live', methods=['POST'])
+@app.route('/live', methods=['POST', 'OPTIONS'])
+@cross_origin(origin='*')
 def live():
+    # Handle preflight request
+    if request.method == 'OPTIONS':
+        response = Response()
+        response.headers['Access-Control-Allow-Origin'] = 'http://localhost:3000'
+        response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+        response.headers['Access-Control-Allow-Credentials'] = 'true'
+        return response
+
     exercise_type = request.form.get('live_exercise_type')
-    return process_live_video(exercise_type)
+    
+    # Your live video processing logic goes here
+    response = process_live_video(exercise_type)
+    
+    # Add CORS headers to the actual response
+    response.headers['Access-Control-Allow-Origin'] = 'http://localhost:3000'
+    response.headers['Access-Control-Allow-Credentials'] = 'true'
+    
+    return response
 
 if __name__ == '__main__':
     app.run(debug=True)
