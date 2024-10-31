@@ -1,8 +1,11 @@
 import os
 import logging
 import cv2
+import numpy as np
 from ultralytics import YOLO
 import streamlit as st
+from pathlib import Path
+from moviepy.editor import ImageSequenceClip
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)
@@ -17,7 +20,7 @@ yolo_models = {
     "front_squat": YOLO("muscleAi_weights/front_squats_best.pt")
 }
 
-# Function to check for injury risk
+# Function to check for injury risk (unchanged)
 def check_injury_risk(labels, exercise_type):
     if exercise_type in ['regular_deadlift', 'squat']:
         ibw_value = labels.get('ibw', 1.0)
@@ -28,7 +31,7 @@ def check_injury_risk(labels, exercise_type):
 
     return "stop right now to prevent injury" if ibw_value < 0.80 or down_value < 0.70 else "No significant risk"
 
-# Function to draw keypoints on the frame
+# Function to draw keypoints on the frame (unchanged)
 def draw_keypoints(frame, keypoints):
     for point in keypoints:
         x, y = int(point[0]), int(point[1])
@@ -46,6 +49,11 @@ def process_video_with_yolo(video_path, exercise_type):
     if not cap.isOpened():
         st.error("Error opening video file")
         return None
+
+    # Get original video FPS
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    if fps == 0:
+        fps = 30  # fallback value
 
     last_ibw_label = None
     rep_count = 0
@@ -77,7 +85,6 @@ def process_video_with_yolo(video_path, exercise_type):
 
             last_ibw_label = current_ibw_label
 
-            # Draw keypoints on the frame if available
             if hasattr(result, 'keypoints') and result.keypoints is not None:
                 keypoints = result.keypoints.xy[0]
                 frame = draw_keypoints(frame, keypoints)
@@ -85,13 +92,73 @@ def process_video_with_yolo(video_path, exercise_type):
             cv2.putText(frame, f"Injury Risk: {injury_risk}", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
             cv2.putText(frame, f"Repetitions: {rep_count}", (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
-            processed_frames.append(frame)
+            # Convert BGR to RGB for MoviePy
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            processed_frames.append(frame_rgb)
 
     cap.release()
     
-    return processed_frames
+    return processed_frames, fps
 
-# Function to process live video stream
+# Streamlit UI
+st.title("Aligno")
+
+exercise_type = st.selectbox("Select Exercise Type", list(yolo_models.keys()))
+
+uploaded_file = st.file_uploader("Upload a Video", type=["mp4", "mov"])
+
+if uploaded_file is not None:
+    # Create directories if they don't exist
+    video_dir = Path('./videos')
+    processed_dir = Path('./processed_videos')
+    
+    video_dir.mkdir(exist_ok=True)
+    processed_dir.mkdir(exist_ok=True)
+
+    # Save uploaded video
+    video_path = video_dir / uploaded_file.name
+    with open(video_path, "wb") as f:
+        f.write(uploaded_file.getbuffer())
+
+    if st.button("Process Video"):
+        with st.spinner('Processing video...'):
+            # Process the video
+            processed_frames, fps = process_video_with_yolo(str(video_path), exercise_type)
+
+            if processed_frames is not None:
+                # Generate output path
+                output_filename = f'processed_{Path(uploaded_file.name).stem}.mp4'
+                output_video_path = processed_dir / output_filename
+                
+                try:
+                    # Create video using MoviePy
+                    clip = ImageSequenceClip(processed_frames, fps=fps)
+                    
+                    # Write video with good quality
+                    clip.write_videofile(
+                        str(output_video_path),
+                        codec='libx264',
+                        fps=fps,
+                        preset='medium',
+                        bitrate='8000k',
+                        audio=False
+                    )
+                    
+                    # Read the processed video for display
+                    with open(output_video_path, 'rb') as video_file:
+                        video_bytes = video_file.read()
+                    
+                    # Display the processed video
+                    st.success("Video processed successfully!")
+                    st.video(video_bytes)
+                    
+                except Exception as e:
+                    st.error(f"Error creating video: {str(e)}")
+                finally:
+                    # Clean up MoviePy clip
+                    if 'clip' in locals():
+                        clip.close()
+
 def process_live_video(exercise_type):
     cap = cv2.VideoCapture(0)
     
@@ -99,19 +166,26 @@ def process_live_video(exercise_type):
         st.error("Error opening webcam")
         return
 
+    # Create placeholder for video frame
     stframe = st.empty()
+    
+    # Create placeholders for metrics
+    metrics_placeholder = st.empty()
     
     last_ibw_label = None
     rep_count = 0
     rep_started = False
+    
+    stop_button = st.button("Stop Stream")
 
-    while True:
+    while not stop_button:
         ret, frame = cap.read()
         if not ret:
+            st.error("Error reading from webcam")
             break
         
         results = yolo_models[exercise_type](source=frame, stream=True, conf=0.3)
-
+        
         for result in results:
             frame = result.orig_img
             
@@ -131,55 +205,21 @@ def process_live_video(exercise_type):
 
             last_ibw_label = current_ibw_label
 
-            # Draw keypoints on the frame if available
+            # Draw keypoints if available
             if hasattr(result, 'keypoints') and result.keypoints is not None:
                 keypoints = result.keypoints.xy[0]
                 frame = draw_keypoints(frame, keypoints)
 
-            cv2.putText(frame, f"Injury Risk: {injury_risk}", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-            cv2.putText(frame, f"Repetitions: {rep_count}", (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-
-            # Update the Streamlit frame with the processed frame
-            stframe.image(frame, channels="BGR")
+            # Convert BGR to RGB for Streamlit
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            
+            # Update frame
+            stframe.image(frame_rgb, channels="RGB", use_column_width=True)
+            
+            # Update metrics
+            metrics_placeholder.text(f"Injury Risk: {injury_risk}\nRepetitions: {rep_count}")
 
     cap.release()
 
-# Streamlit UI
-st.title("Exercise Video Analysis")
-
-exercise_type = st.selectbox("Select Exercise Type", list(yolo_models.keys()))
-
-uploaded_file = st.file_uploader("Upload a Video", type=["mp4", "mov"])
-
-if uploaded_file is not None:
-    video_dir = './videos'
-    if not os.path.exists(video_dir):
-        os.makedirs(video_dir)
-
-    video_path = os.path.join(video_dir, uploaded_file.name)
-
-    
-    
-    # Save uploaded video
-    with open(video_path, "wb") as f:
-        f.write(uploaded_file.getbuffer())
-
-    st.video(uploaded_file)
-
-    if st.button("Process Video"):
-        processed_frames = process_video_with_yolo(video_path, exercise_type)
-
-        if processed_frames is not None:
-            output_video_path = os.path.join('./processed_videos', f'processed_{uploaded_file.name}')
-            out = cv2.VideoWriter(output_video_path, cv2.VideoWriter_fourcc(*'XVID'), 30,
-                                  (processed_frames[0].shape[1], processed_frames[0].shape[0]))
-
-            for frame in processed_frames:
-                out.write(frame)
-            out.release()
-
-            st.success(f"Video processed successfully! You can download it [here](./processed_videos/processed_{uploaded_file.name})")
-
 if st.button("Start Live Stream"):
     process_live_video(exercise_type)
-
