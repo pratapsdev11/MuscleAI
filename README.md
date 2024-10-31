@@ -1,5 +1,5 @@
 # MuscleAI
-AI Posture Coach
+`AI Posture Coach`
 
 ## Installation
 
