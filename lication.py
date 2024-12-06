@@ -3,7 +3,8 @@ import logging
 import cv2
 import numpy as np
 from flask import Flask, render_template, send_from_directory, request, url_for, Response, jsonify
-from moviepy.editor import VideoFileClip
+#from moviepy.editor import VideoFileClip
+from moviepy.video.io.VideoFileClip import VideoFileClip
 from ultralytics import YOLO
 from datetime import datetime
 
