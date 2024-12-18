@@ -16,7 +16,10 @@ source .venv/bin/activate # for linux and mac
 .venv\Scripts\activate # for windows
 pip install -r requirements.txt
 ```
-
+### run Flask Apllication on local host (because i streamlit demands premium subscription)
+```bash
+python lication.py
+```
 ### Streamlit
 ```bash
 streamlit run streamlit.py
